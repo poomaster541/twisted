@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DAMN ZOMBIES</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#050606;color:white;font-family:Arial;overflow:hidden}
+canvas#game{width:100vw;height:100vh;display:block;cursor:crosshair}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:#080b0de8;border:1px solid #555;padding:10px 13px;text-shadow:1px 2px #000}
+#mission{position:absolute;top:15px;left:15px;line-height:1.5}
+#mission b{color:#e6b75b}
+#kills{position:absolute;right:15px;top:15px;text-align:right}
+#map{position:absolute;right:15px;top:90px;border:1px solid #777;background:#080a0c;width:150px;height:112px}
+#stats{position:absolute;bottom:15px;left:15px;display:flex;gap:8px}
+.stat strong{display:block;font-size:24px}
+.stat small{font-size:10px;letter-spacing:2px;color:#aaa}
+#ammo{position:absolute;right:15px;bottom:15px;text-align:right}
+#ammo strong{font-size:29px;color:#e6d29a}
+#crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:18px;height:18px}
+#crosshair:before,#crosshair:after{content:"";position:absolute;background:white;box-shadow:0 0 5px black}
+#crosshair:before{left:8px;width:2px;height:18px}
+#crosshair:after{top:8px;height:2px;width:18px}
+#message{position:absolute;top:18%;width:100%;text-align:center;color:#ffe4a0;font-size:19px;text-shadow:0 2px 5px black}
+#hurt{position:fixed;inset:0;background:#d00000;opacity:0;pointer-events:none}
+#screen{position:fixed;inset:0;background:linear-gradient(#080b0deF,#050606f8);display:flex;align-items:center;justify-content:center;text-align:center;z-index:5}
+#card{max-width:650px;padding:28px}
+h1{font-size:clamp(42px,8vw,78px);letter-spacing:5px;color:#b62c20;margin:0 0 12px;text-shadow:3px 4px #000}
+h2{color:#d7b66c}
+button{background:#9c241c;color:white;border:1px solid #e16b4d;padding:14px 27px;font-size:17px;font-weight:bold;cursor:pointer;margin:8px}
+button:hover{background:#c53a2c}
+.muted{color:#aaa;line-height:1.6}
+#shop{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;z-index:4;text-align:center}
+#shopbox{background:#15191a;border:1px solid #9a6b43;padding:25px;max-width:500px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hurt"></div>
+<div id="hud">
+ <div id="mission" class="panel"><b id="chapter">CHAPTER 1: THE DEAD DISTRICT</b><br><span id="goal">Find the red keycard.</span></div>
+ <div id="kills" class="panel">ZOMBIES KILLED<br><strong id="killCount">0</strong><br><small>POINTS: <span id="points">0</span></small></div>
+ <canvas id="map" width="150" height="112"></canvas>
+ <div id="message"></div><div id="crosshair"></div>
+ <div id="stats">
+  <div class="panel stat"><small>HEALTH</small><strong id="health">100</strong></div>
+  <div class="panel stat"><small>STATUS</small><strong id="status">ALIVE</strong></div>
+ </div>
+ <div id="ammo" class="panel"><small id="weaponName">SHOTGUN</small><br><strong id="shells">8 / 40</strong><br><small>R RELOAD · B SHOP</small></div>
+</div>
+
+<div id="screen">
+ <div id="card">
+  <h1>DAMN ZOMBIES</h1>
+  <p class="muted">OCTOBER 31, 1998<br>THE CITY HAS FALLEN. THE DEAD ARE WALKING.</p>
+  <p>Three locations. Hundreds of dead. One chance to survive.</p>
+  <p class="muted">WASD MOVE · MOUSE AIM · LEFT CLICK SHOOT<br>SHIFT SPRINT · R RELOAD · E INTERACT · B SHOP · ESC RELEASE MOUSE</p>
+  <button id="startButton">ENTER THE DISTRICT</button>
+ </div>
+</div>
+
+<div id="shop">
+ <div id="shopbox">
+  <h2>FIELD SUPPLY SHOP</h2>
+  <p>Points: <strong id="shopPoints">0</strong></p>
+  <button onclick="buyAmmo()">Buy 20 shells — 30 points</button><br>
+  <button onclick="buyHealth()">Restore 40 health — 40 points</button><br>
+  <button onclick="buyDamage()">Upgrade shotgun damage — 75 points</button><br>
+  <button onclick="closeShop()">CLOSE SHOP</button>
+ </div>
+</div>
+
+<script>
+(()=>{
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+const mini=document.getElementById("map"),mx=mini.getContext("2d");
+const $=id=>document.getElementById(id);
+let W,H;
+function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight}
+addEventListener("resize",resize);resize();
+
+const maps=[
+[
+"################",
+"#..............#",
+"#..##..........#",
+"#...........#..#",
+"#......##......#",
+"#..............#",
+"#..#...........#",
+"#..#....##.....#",
+"#..............#",
+"#.....#........#",
+"#..............#",
+"################"
+],
+[
+"################",
+"#..............#",
+"#.##.......##..#",
+"#..............#",
+"#....##........#",
+"#..............#",
+"#..##......##..#",
+"#..............#",
+"#......##......#",
+"#..............#",
+"#..............#",
+"################"
+],
+[
+"################",
+"#..............#",
+"#....##........#",
+"#..............#",
+"#..##..........#",
+"#...........#..#",
+"#..............#",
+"#......##......#",
+"#..............#",
+"#..#...........#",
+"#..............#",
+"################"
+]];
+const chapters=[
+ {name:"CHAPTER 1: THE DEAD DISTRICT",objective:"Find the red keycard.",type:"key"},
+ {name:"CHAPTER 2: THE HOSPITAL",objective:"Find and rescue the trapped survivor.",type:"rescue"},
+ {name:"CHAPTER 3: THE UNDERGROUND",objective:"Kill the underground boss.",type:"boss"}
+];
+let level=0,player={x:2.5,y:2.5,a:0,pitch:0,hp:100,ammo:8,reserve:40,kills:0,points:0,damage:45};
+let enemies=[],pickups=[],shots=[],particles=[];
+let keycard=false,rescued=false,bossDead=false,started=false,dead=false,won=false,shopOpen=false;
+let elapsed=0,last=0,recoil=0,muzzle=0,messageTime=0;
+let message="",keys={},powerOut=false,powerTimer=25,eventTimer=35;
+const keyPositions=[{x:13.5,y:2.5},{x:13.5,y:8.5},{x:12.5,y:2.5}];
+const exitPos={x:13.5,y:9.5};
+const survivor={x:3.5,y:9.5};
+function say(t,time=2.5){message=t;messageTime=time;$("message").textContent=t}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function diff(a,b){return Math.atan2(Math.sin(a-b),Math.cos(a-b))}
+function wall(x,y){let row=maps[level][Math.floor(y)];return !row||row[Math.floor(x)]!=="."}
+function move(x,y){if(!wall(x,player.y))player.x=x;if(!wall(player.x,y))player.y=y}
+function makeEnemy(x,y,type="normal"){
+ return {x,y,type,hp:type==="boss"?650:type==="brute"?180:100,
+ speed:type==="runner"?1.35:type==="brute"?.45:type==="boss"?.55:.72,
+ attack:Math.random(),flash:0};
+}
+function spawnEnemies(){
+ enemies=[];
+ if(level===0){
+  [[7.5,2.5,"normal"],[11.5,5.5,"runner"],[4.5,8.5,"normal"],[12.5,8.5,"brute"],[9.5,9.5,"normal"],[6.5,5.5,"normal"]].forEach(v=>enemies.push(makeEnemy(...v)));
+ }else if(level===1){
+  [[7.5,2.5,"runner"],[11.5,3.5,"normal"],[4.5,5.5,"brute"],[12.5,7.5,"runner"],[8.5,9.5,"normal"],[5.5,8.5,"normal"],[13.5,5.5,"brute"]].forEach(v=>enemies.push(makeEnemy(...v)));
+ }else{
+  [[7.5,2.5,"normal"],[11.5,4.5,"runner"],[4.5,7.5,"brute"],[11.5,8.5,"normal"],[8.5,5.5,"boss"]].forEach(v=>enemies.push(makeEnemy(...v)));
+ }
+}
+function setupLevel(){
+ player.x=2.5;player.y=2.5;player.a=0;player.pitch=0;
+ keycard=false;rescued=false;bossDead=false;
+ pickups=[];
+ spawnEnemies();
+ if(level===0)pickups.push({x:6.5,y:3.5,type:"ammo"},{x:3.5,y:7.5,type:"health"});
+ if(level===1)pickups.push({x:12.5,y:2.5,type:"ammo"},{x:3.5,y:7.5,type:"health"});
+ if(level===2)pickups.push({x:3.5,y:3.5,type:"ammo"},{x:12.5,y:7.5,type:"health"});
+ $("chapter").textContent=chapters[level].name;
+ updateHUD();
+ say(chapters[level].objective,4);
+}
+function cast(angle){
+ let sin=Math.sin(angle),cos=Math.cos(angle);
+ let mx0=Math.floor(player.x),my0=Math.floor(player.y);
+ let dx=Math.abs(1/(cos||.00001)),dy=Math.abs(1/(sin||.00001));
+ let sx=cos<0?-1:1,sy=sin<0?-1:1;
+ let ax=(cos<0?player.x-mx0:mx0+1-player.x)*dx;
+ let ay=(sin<0?player.y-my0:my0+1-player.y)*dy;
+ let side=0,hit=false,steps=0;
+ while(!hit&&steps++<40){
+  if(ax<ay){ax+=dx;mx0+=sx;side=0}else{ay+=dy;my0+=sy;side=1}
+  if(!maps[level][my0]||maps[level][my0][mx0]!=="#".replace("#","."))hit=true;
+ }
+ let d=side===0?ax-dx:ay-dy;
+ let wx=side===0?player.y+d*sin:player.x+d*cos;
+ return {d:Math.max(.01,d),side,wallX:wx-Math.floor(wx),mx:mx0};
+}
+let zbuffer=[];
+function renderWorld(){
+ let horizon=H/2+player.pitch;
+ let sky=ctx.createLinearGradient(0,0,0,horizon);
+ sky.addColorStop(0,powerOut?"#000":"#080c11");sky.addColorStop(1,"#30241e");
+ ctx.fillStyle=sky;ctx.fillRect(0,0,W,horizon);
+ let floor=ctx.createLinearGradient(0,horizon,0,H);
+ floor.addColorStop(0,"#302b26");floor.addColorStop(1,"#080909");
+ ctx.fillStyle=floor;ctx.fillRect(0,horizon,W,H-horizon);
+ ctx.strokeStyle="#b9a17a18";
+ for(let i=1;i<18;i++){let y=horizon+(H-horizon)*i/18;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+ zbuffer=[];
+ for(let x=0;x<W;x+=3){
+  let angle=player.a+(x/W-.5)*Math.PI/3;
+  let h=cast(angle),d=h.d*Math.cos(angle-player.a);
+  zbuffer[Math.floor(x/3)]=d;
+  let wh=Math.min(H*2,H*.92/d),top=horizon-wh/2;
+  let shade=clamp(1-d/11,.12,1)*(h.side?.7:1)*(powerOut?.55:1);
+  let base=level===1?"#62605b":level===2?"#535a58":"#756b5b";
+  ctx.globalAlpha=shade;ctx.fillStyle=base;ctx.fillRect(x,top,3,wh);
+  ctx.globalAlpha=shade*.3;ctx.fillStyle="#171817";
+  for(let yy=top+wh*.25;yy<top+wh;yy+=wh*.25)ctx.fillRect(x,yy,3,2);
+  ctx.globalAlpha=1;
+ }
+ ctx.fillStyle="#d3b57a";ctx.globalAlpha=.04;
+ for(let i=0;i<35;i++)ctx.fillRect((i*191+elapsed*15)%W,(i*89+elapsed*9)%H,2,2);
+ ctx.globalAlpha=1;
+}
+function project(o){
+ let dx=o.x-player.x,dy=o.y-player.y,d=Math.hypot(dx,dy);
+ let a=diff(Math.atan2(dy,dx),player.a);
+ return {d,a,sx:W/2+Math.tan(a)/(Math.tan(Math.PI/6))*W/2,
+ scale:H/(d*1.15),cy:H/2+player.pitch-H/(d*1.15)*.48};
+}
+function visible(p){
+ let i=clamp(Math.floor(p.sx/3),0,zbuffer.length-1);
+ return p.d<zbuffer[i]+.1;
+}
+function drawEnemy(e){
+ if(e.hp<=0)return;
+ let p=project(e);
+ if(p.d<.2||Math.abs(p.a)>Math.PI/3||!visible(p))return;
+ let s=p.scale*(e.type==="boss"?1.8:e.type==="brute"?1.2:.85);
+ ctx.save();ctx.translate(p.sx,p.cy);
+ ctx.fillStyle="#0009";ctx.beginPath();ctx.ellipse(0,s*.43,s*.35,s*.08,0,0,7);ctx.fill();
+ let skin=e.type==="boss"?"#55424b":e.type==="brute"?"#6c5946":"#67735a";
+ ctx.fillStyle="#292522";ctx.fillRect(-s*.22,s*.02,s*.16,s*.42);ctx.fillRect(s*.08,s*.02,s*.16,s*.42);
+ ctx.fillStyle=skin;ctx.fillRect(-s*.29,-s*.25,s*.58,s*.42);
+ ctx.fillStyle=skin;ctx.beginPath();ctx.arc(0,-s*.38,s*.2,0,7);ctx.fill();
+ ctx.strokeStyle=skin;ctx.lineWidth=Math.max(3,s*.1);
+ ctx.beginPath();ctx.moveTo(-s*.2,-s*.17);ctx.lineTo(-s*.4,s*.13);ctx.moveTo(s*.2,-s*.17);ctx.lineTo(s*.4,s*.13);ctx.stroke();
+ ctx.fillStyle="#ff3827";ctx.fillRect(-s*.1,-s*.42,s*.055,s*.035);ctx.fillRect(s*.04,-s*.42,s*.055,s*.035);
+ ctx.fillStyle="#180b0b";ctx.fillRect(-s*.25,-s*.67,s*.5,5);
+ ctx.fillStyle="#c52b22";ctx.fillRect(-s*.25,-s*.67,s*.5*e.hp/(e.type==="boss"?650:e.type==="brute"?180:100),5);
+ if(e.type==="boss"){ctx.fillStyle="#f4d4a2";ctx.font="bold 12px Arial";ctx.textAlign="center";ctx.fillText("THE WARDEN",0,-s*.75)}
+ ctx.restore();
+}
+function drawObject(o,color){
+ let p=project(o);if(p.d>12||Math.abs(p.a)>.8||!visible(p))return;
+ let s=clamp(80/p.d,5,35);
+ ctx.save();ctx.translate(p.sx,p.cy-s*.6);
+ ctx.shadowColor=color;ctx.shadowBlur=18;ctx.fillStyle=color;
+ ctx.fillRect(-s/2,-s/3,s,s*.66);ctx.restore();
+}
+function drawGun(){
+ let bob=(keys.w||keys.s||keys.a||keys.d)?Math.sin(elapsed*11)*5:Math.sin(elapsed*2)*2;
+ ctx.save();ctx.translate(W/2,H-20+bob+recoil*1.7);
+ ctx.fillStyle="#9b765e";ctx.fillRect(-95,-80,48,100);ctx.fillRect(48,-80,48,100);
+ ctx.fillStyle="#17191a";ctx.fillRect(-40,-160,80,160);
+ ctx.fillStyle="#555b5c";ctx.fillRect(-26,-220,52,130);
+ ctx.fillStyle="#25292b";ctx.fillRect(-18,-255,36,120);
+ ctx.fillStyle="#777d7b";ctx.fillRect(-12,-250,24,100);
+ ctx.fillStyle="#4b3023";ctx.fillRect(-45,-65,90,60);
+ if(muzzle>0){
+  ctx.globalAlpha=muzzle*6;ctx.fillStyle="#ffe68b";
+  ctx.beginPath();ctx.moveTo(0,-290);ctx.lineTo(-50,-235);ctx.lineTo(-15,-240);ctx.lineTo(0,-190);ctx.lineTo(20,-240);ctx.lineTo(52,-235);ctx.fill();
+ }
+ ctx.restore();
+}
+function drawShots(){
+ for(let s of shots){
+  ctx.globalAlpha=clamp(s.life/.15,0,1);ctx.strokeStyle=s.color;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(W/2,H/2);ctx.lineTo(s.x,s.y);ctx.stroke();
+ }
+ ctx.globalAlpha=1;
+}
+function drawMap(){
+ mx.fillStyle="#080b0d";mx.fillRect(0,0,150,112);
+ let cw=150/16,ch=112/12;
+ maps[level].forEach((r,y)=>[...r].forEach((c,x)=>{mx.fillStyle=c==="#"?"#77766c":"#1c2523";mx.fillRect(x*cw,y*ch,cw-1,ch-1)}));
+ for(let e of enemies)if(e.hp>0){mx.fillStyle="#e43";mx.fillRect(e.x*cw-1,e.y*ch-1,4,4)}
+ for(let p of pickups){mx.fillStyle=p.type==="health"?"#4f9":"#fc4";mx.fillRect(p.x*cw-2,p.y*ch-2,5,5)}
+ mx.fillStyle="#fff";mx.beginPath();mx.arc(player.x*cw,player.y*ch,3,0,7);mx.fill();
+ mx.strokeStyle="#fff";mx.beginPath();mx.moveTo(player.x*cw,player.y*ch);mx.lineTo((player.x+Math.cos(player.a)) *cw,(player.y+Math.sin(player.a))*ch);mx.stroke();
+}
+function render(){
+ renderWorld();
+ if(level===0&&!keycard)drawObject(keyPositions[level],"#f33");
+ if(level===1&&!rescued)drawObject(survivor,"#4f9");
+ if(level===2&&!bossDead)drawObject({x:8.5,y:5.5},"#f33");
+ drawObject(exitPos,"#35ff9a");
+ for(let e of [...enemies].sort((a,b)=>dist(b,player)-dist(a,player)))drawEnemy(e);
+ for(let p of pickups)drawObject(p,p.type==="health"?"#4f9":"#fc4");
+ drawShots();drawGun();
+ let g=ctx.createRadialGradient(W/2,H/2,H*.15,W/2,H/2,H*.75);
+ g.addColorStop(0,"transparent");g.addColorStop(1,"#000b");
+ ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ drawMap();
+}
+function shoot(){
+ if(!started||dead||won||shopOpen)return;
+ if(player.ammo<=0){say("CLICK! RELOAD.");return}
+ player.ammo--;recoil=16;muzzle=.16;
+ for(let i=0;i<8;i++)shots.push({x:W/2+(Math.random()-.5)*W*.15,y:H/2+(Math.random()-.5)*H*.1,life:.15,color:"#ffe4a0"});
+ let hit=false;
+ for(let e of enemies){
+  if(e.hp<=0)continue;
+  let p=project(e),d=p.d;
+  if(Math.abs(p.a)<.11+.15/d&&Math.abs(p.cy-H/2)<Math.max(40,p.scale*.4)&&visible(p)){
+   e.hp-=player.damage*(e.type==="boss"?.8:1);
+   e.flash=.15;hit=true;
+   if(e.hp<=0){
+    e.hp=0;player.kills++;player.points+=e.type==="boss"?150:20;
+    say(e.type==="boss"?"THE WARDEN IS DOWN!":"ZOMBIE ELIMINATED");
+   }else say("HIT!",.5);
+  }
+ }
+ if(!hit)say("SHOT FIRED",.4);
+ updateHUD();
+}
+function reload(){
+ if(player.ammo>=8||player.reserve<=0)return;
+ let n=Math.min(8-player.ammo,player.reserve);player.ammo+=n;player.reserve-=n;
+ say("RELOADED");updateHUD();
+}
+function updateHUD(){
+ $("health").textContent=Math.ceil(player.hp);
+ $("shells").textContent=player.ammo+" / "+player.reserve;
+ $("killCount").textContent=player.kills;
+ $("points").textContent=player.points;
+ $("goal").textContent=level===0?(keycard?"Reach extraction.":"Find the red keycard."):level===1?(rescued?"Reach extraction.":"Find the trapped survivor."):bossDead?"Reach extraction.":"Defeat THE WARDEN.";
+}
+function hurt(n){
+ player.hp=Math.max(0,player.hp-n);$("hurt").style.opacity=.35;
+ setTimeout(()=>$("hurt").style.opacity=0,120);updateHUD();
+ if(player.hp<=0)gameOver();
+}
+function gameOver(){
+ dead=true;document.exitPointerLock?.();
+ showScreen("YOU DIED","The district has claimed another victim.","TRY AGAIN",()=>location.reload());
+}
+function showScreen(title,sub,button,fn){
+ $("screen").style.display="flex";
+ $("card").innerHTML=`<h1>${title}</h1><p class="muted">${sub}</p><button id="screenButton">${button}</button>`;
+ $("screenButton").onclick=fn;
+}
+function interact(){
+ if(level===0&&!keycard&&dist(player,keyPositions[0])<1.5){
+  keycard=true;say("KEYCARD ACQUIRED! FIND EXTRACTION.",4);
+ }else if(level===1&&!rescued&&dist(player,survivor)<1.5){
+  rescued=true;player.points+=50;say("SURVIVOR RESCUED! +50 POINTS",4);
+ }else if(level===2&&!bossDead){
+  say("THE WARDEN MUST BE DEFEATED FIRST.");
+ }else if((level===0&&keycard||level===1&&rescued||level===2&&bossDead)&&dist(player,exitPos)<1.7){
+  if(level<2){
+   level++;setupLevel();say("NEW CHAPTER: "+chapters[level].name,4);
+  }else dreamEnding();
+ }else if(pickups.length){
+  let i=pickups.findIndex(p=>dist(player,p)<1.3);
+  if(i>=0){
+   let p=pickups.splice(i,1)[0];
+   if(p.type==="ammo"){player.reserve+=15;say("AMMO COLLECTED")}
+   else{player.hp=Math.min(100,player.hp+35);say("MEDKIT COLLECTED")}
+  }else say("NOTHING TO INTERACT WITH.");
+ }else say("NOTHING TO INTERACT WITH.");
+ updateHUD();
+}
+function buyAmmo(){if(player.points>=30){player.points-=30;player.reserve+=20;say("20 SHELLS PURCHASED")}else say("NOT ENOUGH POINTS")}
+function buyHealth(){if(player.points>=40&&player.hp<100){player.points-=40;player.hp=Math.min(100,player.hp+40);say("HEALTH RESTORED")}else say("NOT ENOUGH POINTS OR HEALTH IS FULL")}
+function buyDamage(){if(player.points>=75&&player.damage<100){player.points-=75;player.damage+=15;say("SHOTGUN UPGRADED")}else say("NOT ENOUGH POINTS OR MAX UPGRADE")}
+function closeShop(){shopOpen=false;$("shop").style.display="none";canvas.requestPointerLock?.()}
+window.buyAmmo=buyAmmo;window.buyHealth=buyHealth;window.buyDamage=buyDamage;window.closeShop=closeShop;
+function dreamEnding(){
+ won=true;document.exitPointerLock?.();
+ $("screen").style.display="flex";$("screen").style.background="#000";
+ let card=$("card");
+ card.innerHTML="<h1>YOU MADE IT...</h1><p class='muted'>The extraction point is finally clear.</p>";
+ setTimeout(()=>card.innerHTML="<h1>WAIT...</h1><p class='muted'>Why has everything gone quiet?</p>",3500);
+ setTimeout(()=>card.innerHTML="<h1>IT'S NOT REAL...</h1><p class='muted'>He looks down at the shotgun.</p>",7000);
+ setTimeout(()=>card.innerHTML="",10500);
+ setTimeout(()=>card.innerHTML="<h1 style='color:#eee'>...</h1><p class='muted'>A distant gunshot echoes.</p>",13000);
+ setTimeout(()=>card.innerHTML="<h1 style='color:#eee'>WAKE UP.</h1><p class='muted'>October 31, 1998.</p>",17000);
+ setTimeout(()=>{
+  $("screen").style.background="linear-gradient(#202633,#090b10)";
+  card.innerHTML="<h1 style='color:#eee'>DAMN ZOMBIES</h1><h2>IT WAS ALL A DREAM.</h2><p class='muted'>You wake up in your bedroom.<br>No zombies. No outbreak. No escape.<br><br>But something is knocking at your door...</p><button onclick='location.reload()'>WAKE UP AGAIN</button>";
+ },21000);
+}
+function update(dt){
+ elapsed+=dt;recoil=Math.max(0,recoil-dt*65);muzzle=Math.max(0,muzzle-dt);
+ messageTime-=dt;if(messageTime<=0)$("message").textContent="";
+ shots.forEach(s=>s.life-=dt);shots=shots.filter(s=>s.life>0);
+ if(!started||dead||won||shopOpen)return;
+ let speed=(keys.shift?3.8:2.4)*dt;
+ let f=(keys.w?1:0)-(keys.s?1:0),side=(keys.d?1:0)-(keys.a?1:0);
+ move(player.x+(Math.cos(player.a)*f-Math.sin(player.a)*side)*speed,
+      player.y+(Math.sin(player.a)*f+Math.cos(player.a)*side)*speed);
+ for(let e of enemies){
+  if(e.hp<=0)continue;
+  let d=dist(e,player);
+  if(d>.7){
+   let step=e.speed*dt,nx=e.x+(player.x-e.x)/d*step,ny=e.y+(player.y-e.y)/d*step;
+   if(!wall(nx,e.y))e.x=nx;if(!wall(e.x,ny))e.y=ny;
+  }else{
+   e.attack-=dt;if(e.attack<=0){hurt(e.type==="boss"?18:9);e.attack=e.type==="runner"?.7:1.1;say("YOU ARE BEING ATTACKED!",.6)}
+  }
+ }
+ // Random events: extra runner ambush
+ eventTimer-=dt;
+ if(eventTimer<=0){
+  eventTimer=45;
+  if(enemies.filter(e=>e.hp>0).length<9){
+   enemies.push(makeEnemy(13.5,6.5,"runner"));
+   say("WARNING: RUNNER DETECTED!",3);
+  }
+ }
+ // Random power outage
+ powerTimer-=dt;
+ if(powerTimer<=0){powerOut=!powerOut;powerTimer=powerOut?5:28;if(powerOut)say("POWER FAILURE!",3)}
+ updateHUD();
+}
+function loop(t){
+ let dt=Math.min(.04,(t-last)/1000||0);last=t;update(dt);render();requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+$("startButton").onclick=()=>{started=true;$("screen").style.display="none";canvas.requestPointerLock?.();setupLevel()};
+canvas.addEventListener("click",()=>{if(started&&!dead&&!won&&!shopOpen&&document.pointerLockElement!==canvas)canvas.requestPointerLock?.()});
+document.addEventListener("mousedown",e=>{if(e.button===0&&document.pointerLockElement===canvas)shoot()});
+document.addEventListener("mousemove",e=>{
+ if(document.pointerLockElement===canvas&&started&&!shopOpen){
+  player.a+=e.movementX*.0025;
+  player.pitch=clamp(player.pitch-e.movementY*.65,-H*.22,H*.22);
+ }
+});
+document.addEventListener("keydown",e=>{
+ let k=e.key.toLowerCase();keys[k]=true;
+ if(k==="r")reload();
+ if(k==="e")interact();
+ if(k==="b"&&started&&!dead&&!won){
+  shopOpen=true;$("shop").style.display="flex";$("shopPoints").textContent=player.points;document.exitPointerLock?.();
+ }
+ if(k==="arrowleft")player.a-=.06;
+ if(k==="arrowright")player.a+=.06;
+ if(k==="arrowup")player.pitch=clamp(player.pitch-12,-H*.22,H*.22);
+ if(k==="arrowdown")player.pitch=clamp(player.pitch+12,-H*.22,H*.22);
+});
+document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+document.addEventListener("contextmenu",e=>e.preventDefault());
+setupLevel();
+})();
+</script>
+</body>
+</html>
